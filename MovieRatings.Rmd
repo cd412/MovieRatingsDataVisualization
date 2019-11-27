@@ -1,0 +1,451 @@
+---
+title: "Case Study 2 - Analyzing data from MovieLens"
+author: "Chris Defreitas"
+subtitle: DS501 - Introduction to Data Science
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+## Introduction
+**Desired outcome of the case study.**
+In this case study we will look at the movies data set from MovieLens.
+It contains data about users and how they rate movies.
+The idea is to analyze the data set, make conjectures, support or refute those conjectures with data, and tell a story about the data!
+
+## Problem 1: Importing the MovieLens data set and merging it into a single data frame
+```{r, message = FALSE}
+library(RCurl)
+fname = "MLDataMulti.csv"
+url = "https://raw.githubusercontent.com/dnchari/DS501_MovieLens/master/Results/unifiedMLDataMulti.csv"
+
+if (file.exists(fname)) {
+    # Read file from disk
+    print("Reading from disk...")
+    df = read.csv(fname)
+} else {
+    # Read file from internet
+    print("Reading from internet...")
+    d1 = getURL(url)
+    writeLines(d1, fname)
+    df = read.csv(fname)
+}
+```
+
+#### Remove non-ascii characters from the movie titles
+```{r, message = FALSE}
+#install.packages('textclean')
+library('textclean')
+df$movie_title = replace_non_ascii(df$movie_title, "")
+```
+#### Convert release date column to date
+```{r, message = FALSE}
+library(lubridate)
+df$release_date = ymd(df$release_date)
+```
+
+
+#### Tidy data
+```{r, message = FALSE}
+df$movie_title <- as.factor(df$movie_title)
+
+library(dplyr)
+df_distinct = distinct(df, user_id, movie_title, .keep_all = TRUE)
+
+df_users = distinct(df, user_id, .keep_all = TRUE)
+```
+
+
+**Basic statistics about the data**
+
+```{r, message = FALSE}
+library(glue)
+library(ggplot2)
+```
+
+```{r}
+gb = df_distinct %>% group_by(year = year(df_distinct$release_date)) %>% summarise(count=n())
+
+st = glue("Release date ranges from {min(df_distinct$release_date)} to {max(df_distinct$release_date)}")
+qplot(year, count, data=gb) + xlab('Year of Release Date') + ggtitle('Number of Movies per Release Year', subtitle = st)
+```
+
+- How many movies have an average rating over 4.5 overall?
+```{r}
+gb = df_distinct %>% group_by(movie_title) %>% summarise_at(vars(rating), mean)
+num_movies = nrow(gb)
+
+movies_ge45 = gb %>% filter(gb$rating >= 4.5)
+num_movies_ge45 = nrow(movies_ge45)
+
+pct45 = round(100*num_movies_ge45/num_movies, digits = 2)
+
+glue("Of {num_movies} movies, {num_movies_ge45} or {pct45}%, are rated 4.5 stars or more.")
+```
+
+
+- How many movies have an average rating over 4.5 among men? How about women?
+```{r}
+gb = df_distinct  %>% filter(df_distinct$gender == 'M') %>% group_by(movie_title) %>% summarise_at(vars(rating), mean)
+num_movies = nrow(gb)
+
+movies_ge45 = gb %>% filter(gb$rating >= 4.5)
+num_movies_ge45 = nrow(movies_ge45)
+
+pct45 = round(100*num_movies_ge45/num_movies, digits = 2)
+
+glue("Of {num_movies} movies rated by males, {num_movies_ge45} or {pct45}%, are rated 4.5 stars or more.")
+```
+```{r}
+gb = df_distinct  %>% filter(df_distinct$gender == 'F') %>% group_by(movie_title) %>% summarise_at(vars(rating), mean)
+num_movies = nrow(gb)
+
+movies_ge45 = gb %>% filter(gb$rating >= 4.5)
+num_movies_ge45 = nrow(movies_ge45)
+
+pct45 = round(100*num_movies_ge45/num_movies, digits = 2)
+
+glue("Of {num_movies} movies rated by females, {num_movies_ge45} or {pct45}%, are rated 4.5 stars or more.")
+```
+
+This shows that someone is more likely to share the love for a movie with someone within their gender than otherwise. Let's see if this trend continues when the demographic is filtered by age as well.
+
+
+- How many movies have an median rating over 4.5 among men over age 30? How about women over age 30?
+```{r}
+gb = df_distinct  %>% filter(df_distinct$gender == 'M' & df_distinct$age > 30) %>% group_by(movie_title) %>% summarise_at(vars(rating), mean)
+num_movies = nrow(gb)
+
+movies_ge45 = gb %>% filter(gb$rating >= 4.5)
+num_movies_ge45 = nrow(movies_ge45)
+
+pct45 = round(100*num_movies_ge45/num_movies, digits = 2)
+
+glue("Of {num_movies} movies rated by males over 30, {num_movies_ge45} or {pct45}%, are rated 4.5 stars or more.")
+```
+
+```{r}
+gb = df_distinct  %>% filter(df_distinct$gender == 'F' & df_distinct$age > 30) %>% group_by(movie_title) %>% summarise_at(vars(rating), mean)
+num_movies = nrow(gb)
+
+movies_ge45 = gb %>% filter(gb$rating >= 4.5)
+num_movies_ge45 = nrow(movies_ge45)
+
+pct45 = round(100*num_movies_ge45/num_movies, digits = 2)
+
+glue("Of {num_movies} movies rated by females over 30, {num_movies_ge45} or {pct45}%, are rated 4.5 stars or more.")
+```
+
+Yes, we see that when limiting the age to over 30 and by gender, the percent of movies that are loved goes up again.
+
+- What are the ten most popular movies?
+
+Popularity is defined as the highest average rating. To qualify as popular the movie must be in the top 10% of movies by number of ratings. This filter was applied to make sure that movies with few ratings are not considered popular. This list will exclude movies that are the favorite of only a small group.
+
+```{r}
+gb = df_distinct %>% group_by(movie_title) %>% summarise(avg_rating=round(mean(rating),2), num_rating=n())
+
+num_rating90pct = quantile(gb$num_rating, c(0.90))
+
+most_popular = gb  %>% filter(gb$num_rating >= num_rating90pct) %>% arrange(desc(avg_rating))
+head(most_popular, 10)
+```
+
+- Make some conjectures about how easy various groups are to please? Support your answers with data!
+    + For example, one might conjecture that people between the ages of 1 and 10 are the easiest to please since they are all young children.    This conjecture may or may not be true, but how would you support or disprove either conclusion with with data?
+    + Be sure to come up with your own conjectures and support them with data!
+
+    + Conjecture 1: Students will have higher average ratings than retired people
+```{r}
+round(mean(filter(df_distinct, df_distinct$occupation == 'student')$rating), 2)
+round(mean(filter(df_distinct, df_distinct$occupation == 'retired')$rating), 2)
+```
+```{r}
+gb = df_distinct %>% group_by(occupation) %>% summarise(avg_rating = round(mean(rating),2), pct_of_ratings = round(100*n()/nrow(df_distinct),2)) %>% arrange(desc(avg_rating))
+gb
+```
+    + Finding 1: Students have only slightly higher ratings than retired people. 
+    People without a job have the highest rating and have made 0.9% of the ratings.
+
+
+    + Conjecture 2: Children under the age of 16 give higher ratings than adults.
+    
+```{r, message = FALSE}
+df_distinct$age_bin = cut(df_distinct$age, breaks=c(0,5,10,15,20,25,30,35,40,45,50,55,60,100))
+ggplot(df_distinct, aes(x=factor(age_bin))) + geom_bar(fill = "royal blue") + ggtitle('Number of Ratings by Age Group')
+```
+The vast majority of ratings overall come from adults ages 16 or older.
+
+```{r, message = FALSE}
+gb = df_distinct %>% group_by(age_bin) %>% summarise(avg_rating = round(mean(rating),2), num_rating = n())
+ggplot(gb, aes(x=factor(age_bin), y=avg_rating)) + geom_bar(fill = "sea green", stat='identity') + ggtitle('Average Ratings by Age Group')
+```
+Finding 2.1: Based on average ratings, there is not a major difference between age groups.
+
+```{r}
+gb = df_distinct %>% group_by(age_bin, rating) %>% summarise(count=n())
+
+gb2 = df_distinct %>% group_by(age_bin) %>% summarise(count=n())
+
+gb3 = dplyr::left_join(gb, gb2, by = 'age_bin')
+gb3$pct_rating = gb3$count.x/gb3$count.y
+
+ggplot(data = gb3, aes(x = age_bin, y = rating)) + geom_tile(aes(fill = pct_rating)) + ggtitle("Distribution of Ratings per Age Group")
+
+ggplot(gb3, aes(fill=as.factor(rating), y=pct_rating, x=age_bin)) + 
+    geom_bar(position="dodge", stat="identity")
+
+```
+
+    + Finding 2.2: As the population ages, they give more of their movies a 4-star rating. 
+Users in the 25-29 age group have high standards and are more reluctant to give out 5-star ratings.
+
+
+## Problem 2: Expand our investigation to histograms
+**An obvious issue with any inferences drawn from Problem 1 is that we did not consider how many times a movie was rated.**
+
+- Plot a histogram of the ratings of all movies.
+```{r, message = FALSE}
+ggplot(df_distinct, aes(x=rating)) + geom_histogram(fill = "royal blue", bins=5) + ggtitle("Number of Ratings")
+```
+
+- Plot a histogram of the number of ratings each movie recieved.
+```{r, message = FALSE}
+gb = df_distinct %>% group_by(movie_title) %>% summarise(count=n())
+ggplot(gb, aes(x=count)) + geom_histogram(fill = "royal blue") + ggtitle("Number of Ratings per Movie")
+```
+This plot is skewed. Most movies have very ratings and a few movies have a large number of ratings.
+
+- Plot a histogram of the average rating for each movie.
+```{r, message = FALSE}
+gb = df_distinct %>% group_by(movie_title) %>% summarise(avg_rating=mean(rating))
+ggplot(gb, aes(x=avg_rating)) + geom_histogram(fill = "sea green") + ggtitle("Average Rating per Movie")
+```
+
+
+- Plot a histogram of the average rating for movies which are rated more than 100 times.
+```{r, message = FALSE}
+gb = df_distinct %>% group_by(movie_title) %>% summarise(avg_rating=mean(rating), count=n())
+ggplot(gb %>% filter(gb$count > 100), aes(x=avg_rating)) + geom_histogram(fill = "sea green") + ggtitle("Average Rating per Movie", "For movies with at least 100 ratings")
+```
+ + What do you observe about the tails of the histogram where you use all the movies versus the one where you only use movies rated more than 100 times? Which highly rated movies would you trust are actually good? Those rated more than 100 times or those rated less than 100 times?
+    
+  When only including movies with more than 100 ratings, the tails smoothed out and taper off. This means that some movies with few ratings have very dramatic ratings that should not be trusted. The highly rated movies with more than 100 ratings are more likely to be actually good because they have been consistently rated highly by many users. 
+  
+  
+- Make some conjectures about the distribution of ratings? Support your answers with data!
+
+Conjecture 2.1 - Movies from the 80's are most popular amount people who were teenagers when they were released.
+
+```{r}
+df_distinct$release_year = year(df_distinct$release_date)
+# This dataset was generated on October 17, 2016. http://files.grouplens.org/datasets/movielens/ml-20m-README.html
+df_distinct$age_when_released = df_distinct$release_year - 2016 + df_distinct$age
+
+df_80s = df_distinct %>% filter(df_distinct$release_year >= 1980 & df_distinct$release_year <= 1989)
+
+df_80s$age_when_released_bin = cut(df_80s$age_when_released, breaks=c(min(df_80s$age_when_released)-1, 0, 12, 19, max(df_80s$age_when_released)))
+
+gb = df_80s %>% group_by(age_when_released_bin) %>% summarise(avg_rating = round(mean(rating),2), num_rating = n())
+
+ggplot(gb, aes(x=factor(age_when_released_bin), y=num_rating)) + geom_bar(fill = "royal blue", stat='identity') + ggtitle('Number of Ratings by Age Group when Released', "Movies released in the 1980's") + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+gb = df_80s %>% group_by(age_when_released_bin, rating=rating) %>% summarise(count=n())
+
+ggplot(gb, aes(fill=rating, y=count, x=age_when_released_bin)) + 
+    geom_bar(position="fill", stat="identity") + ggtitle('Ratings by Age Group when Released', "Movies released in the 1980's") + ylab('Fraction of Ratings') + xlab('Age when Movie was Released')
+```
+
+Finding 2.1: The 80's teens have slightly more ratings or 4 or more stars compared the other age groups when it comes to 80's movies.
+
+
+## Problem 3: Correlation: Men versus women
+**Let us look more closely at the relationship between the pieces of data we have.**
+```{r}
+qplot(factor(gender), data=df_distinct, geom='bar', fill=factor(gender)) + ylab('Number of Ratings') + xlab('Gender') + ggtitle('Number of Ratings per Gender')
+```
+
+```{r}
+df_users = df_distinct %>% group_by(user_id) %>% summarise(
+  num_ratings = n(), 
+  avg_rating = mean(rating), 
+  gender=first(gender), 
+  age=first(age), 
+  occupation = first(occupation)
+)
+```
+
+```{r}
+qplot(factor(gender), data=df_users, geom='bar', fill=factor(gender)) + ylab('Number of Users') + xlab('Gender') + ggtitle('Number of Users per Gender')
+```
+```{r}
+ ggplot(df_users, aes(factor(gender), num_ratings)) + geom_boxplot(aes(fill = factor(gender))) + ggtitle('Number of Ratings per User') + ylab('Number of Ratings') + xlab('Gender of User')
+```
+
+The most active users have posted hundreds of ratings
+
+```{r}
+head(df_users %>% arrange(desc(num_ratings)), 10)
+```
+
+
+```{r, message = FALSE}
+ggplot(df_users, aes(x=avg_rating)) + geom_histogram(fill = "sea green") + ggtitle('Average Rating by Each user', 'Normal distribution')
+ggplot(df_users, aes(x=num_ratings)) + geom_histogram(fill = "royal blue") + ggtitle('Number of Ratings by Each user', 'Skewed distribution')
+```
+
+```{r, message = FALSE}
+ggplot(df_users, aes(x=avg_rating, color=gender)) + geom_histogram(fill='light gray', alpha=0.9, position='identity') + facet_grid(gender ~ .) + ggtitle('Average Rating by Users', 'Separated by Gender') + xlab('Average Rating')
+```
+
+
+
+- Make a scatter plot of men versus women and their mean rating for every movie.
+```{r}
+gb = df_distinct %>% group_by(gender, movie_title) %>% summarise(avg_rating = mean(rating), num_rating = n())
+
+ggplot(gb, aes(x=movie_title, y=avg_rating, color=gender, alpha=0.2)) + 
+  geom_point(size=2) + facet_grid(gender ~ .) + 
+  ylim(1,5) + ylab('Average Rating') + 
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  ggtitle('Average Rating for Movies by Gender', 'All movies')
+```
+
+
+
+
+- Make a scatter plot of men versus women and their mean rating for movies rated more than 200 times.
+```{r, echo = FALSE}
+gb = df_distinct %>% group_by(movie_title) %>% summarise(avg_rating = mean(rating), num_rating = n())
+
+
+gb2 = df_distinct %>% 
+  left_join(gb, by='movie_title') %>% 
+  group_by(gender, movie_title) %>% 
+  summarise(avg_rating = mean(rating), num_rating = first(num_rating))
+
+gb3 = gb2 %>% filter(num_rating > 200)
+
+gb_F = gb3 %>% filter(gender=='F') %>% arrange(movie_title)
+gb_M = gb3 %>% filter(gender=='M') %>% arrange(movie_title)
+corr_coef = round(cor(gb_F$avg_rating, gb_M$avg_rating),4)
+
+ggplot(gb3, aes(x=movie_title, y=avg_rating, color=gender)) + 
+  geom_point(size=2) + facet_grid(gender ~ .) + 
+  ylim(1,5) + ylab('Average Rating') + 
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  ggtitle('Average Rating for Movies by Gender', glue('All movies with at least 200 ratings. Correlation Coefficient = {corr_coef}'))
+```
+
+There is a high correlation between the ratings of men and women for these movies. I believe there will be a higher correlation if we look at only comedy movies than drama and action movies all with over 200 ratings.
+
+```{r, echo = FALSE}
+gb = df_distinct %>% group_by(movie_title) %>% summarise(avg_rating = mean(rating), num_rating = n())
+
+gb2 = df %>% 
+  filter(genre == 'Comedy') %>%
+  left_join(gb, by='movie_title') %>% 
+  group_by(gender, movie_title) %>% 
+  summarise(avg_rating = mean(rating), num_rating = first(num_rating))
+
+gb3 = gb2 %>% filter(num_rating > 200)
+
+
+gb_F = gb3 %>% filter(gender=='F') %>% arrange(movie_title)
+gb_M = gb3 %>% filter(gender=='M') %>% arrange(movie_title)
+corr_coef = round(cor(gb_F$avg_rating, gb_M$avg_rating),4)
+
+ggplot(gb3, aes(x=movie_title, y=avg_rating, color=gender)) + 
+  geom_point(size=2) + facet_grid(gender ~ .) + 
+  ylim(1,5) + ylab('Average Rating') + 
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  ggtitle('Average Rating for Movies by Gender', glue('Comedy movies with at least 200 ratings. Correlation Coefficient = {corr_coef}'))
+```
+```{r, echo = FALSE}
+gb = df_distinct %>% group_by(movie_title) %>% summarise(avg_rating = mean(rating), num_rating = n())
+
+gb2 = df %>% 
+  filter(genre == 'Action') %>%
+  left_join(gb, by='movie_title') %>% 
+  group_by(gender, movie_title) %>% 
+  summarise(avg_rating = mean(rating), num_rating = first(num_rating))
+
+gb3 = gb2 %>% filter(num_rating > 200)
+
+
+gb_F = gb3 %>% filter(gender=='F') %>% arrange(movie_title)
+gb_M = gb3 %>% filter(gender=='M') %>% arrange(movie_title)
+corr_coef = round(cor(gb_F$avg_rating, gb_M$avg_rating),4)
+
+ggplot(gb3, aes(x=movie_title, y=avg_rating, color=gender)) + 
+  geom_point(size=2) + facet_grid(gender ~ .) + 
+  ylim(1,5) + ylab('Average Rating') + 
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  ggtitle('Average Rating for Movies by Gender', glue('Action movies with at least 200 ratings. Correlation Coefficient = {corr_coef}'))
+```
+
+```{r, echo = FALSE}
+gb = df_distinct %>% group_by(movie_title) %>% summarise(avg_rating = mean(rating), num_rating = n())
+
+gb2 = df %>% 
+  filter(genre == 'Drama') %>%
+  left_join(gb, by='movie_title') %>% 
+  group_by(gender, movie_title) %>% 
+  summarise(avg_rating = mean(rating), num_rating = first(num_rating))
+
+gb3 = gb2 %>% filter(num_rating > 200)
+
+
+gb_F = gb3 %>% filter(gender=='F') %>% arrange(movie_title)
+gb_M = gb3 %>% filter(gender=='M') %>% arrange(movie_title)
+corr_coef = round(cor(gb_F$avg_rating, gb_M$avg_rating),4)
+
+ggplot(gb3, aes(x=movie_title, y=avg_rating, color=gender)) + 
+  geom_point(size=2) + facet_grid(gender ~ .) + 
+  ylim(1,5) + ylab('Average Rating') + 
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  ggtitle('Average Rating for Movies by Gender', glue('Drama movies with at least 200 ratings. Correlation Coefficient = {corr_coef}'))
+```
+
+
+It turns out the correlation coefficient decreases when only looking at comedy movies. So men and women have a different sense of humor. They actually have more similar tastes when it comes to drama and action movies.
+
+If men and women agree about drama and action, let's see if they agree about romance movies.
+
+```{r, echo = FALSE}
+gb = df_distinct %>% group_by(movie_title) %>% summarise(avg_rating = mean(rating), num_rating = n())
+
+gb2 = df %>% 
+  filter(genre == 'Romance') %>%
+  left_join(gb, by='movie_title') %>% 
+  group_by(gender, movie_title) %>% 
+  summarise(avg_rating = mean(rating), num_rating = first(num_rating))
+
+gb3 = gb2 %>% filter(num_rating > 200)
+
+
+gb_F = gb3 %>% filter(gender=='F') %>% arrange(movie_title)
+gb_M = gb3 %>% filter(gender=='M') %>% arrange(movie_title)
+corr_coef = round(cor(gb_F$avg_rating, gb_M$avg_rating),4)
+
+ggplot(gb3, aes(x=movie_title, y=avg_rating, color=gender)) + 
+  geom_point(size=2) + facet_grid(gender ~ .) + 
+  ylim(1,5) + ylab('Average Rating') + 
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  ggtitle('Average Rating for Movies by Gender', glue('Romance movies with at least 200 ratings. Correlation Coefficient = {corr_coef}'))
+```
+
+
+
